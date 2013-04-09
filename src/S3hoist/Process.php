@@ -100,6 +100,11 @@ class Process {
 
     }
 
+    private function getimagesizefromstr($str) {
+        $uri = 'data://application/octet-stream;base64,' . base64_encode($str);
+        return getimagesize($uri);
+    }
+
     public function setParameters($parameters) {
 
         $this->parametersAvaliable = $this->arrayMerge($this->parametersAvaliable, $parameters);
@@ -273,8 +278,10 @@ class Process {
     public function processObject($originalObjectData, $sendOriginaltoS3 = false) {
 
         $finfo = new \finfo(FILEINFO_MIME);
-        $mime = strtolower(explode(';', $finfo->buffer($originalObjectData) . ";")[0]);
-        $type = strtolower(explode('/', $finfo->buffer($originalObjectData) . "/")[0]);
+        $temp = explode(';', $finfo->buffer($originalObjectData) . ";");
+        $mime = strtolower($temp[0]);
+        $temp = explode('/', $finfo->buffer($originalObjectData) . "/");
+        $type = strtolower($temp[0]);
 
         $this->debug('Type: ' . $type);
         $this->debug('Mime: ' . $mime);
@@ -301,7 +308,7 @@ class Process {
         $this->debug('Proccessing image');
 
         $this->originalObject = imagecreatefromstring($originalImageData);
-        $originalImageProperties = getimagesizefromstring($originalImageData);
+        $originalImageProperties = $this->getimagesizefromstr($originalImageData);
         $this->originalImageWidth = intval($originalImageProperties[0]);
         $this->originalImageHeight = intval($originalImageProperties[1]);
         $this->originalImageType = $originalImageProperties[2];
@@ -326,26 +333,56 @@ class Process {
         $desiredMaxWidth = $maxWidth === NULL ? $this->originalImageWidth : $maxWidth;
         $desiredMaxHeight = $maxHeight === NULL ? $this->originalImageHeight : $maxHeight;
 
+        $hardWidth = false;
+        $hardHeight = false;
+
         $width = $this->parameters['width'];
         $height = $this->parameters['height'];
-        $desiredWidth = $width === NULL ? ($height === NULL ? $this->originalImageWidth : $this->originalImageWidth * $height / $this->originalImageHeight) : $width;
-        $desiredHeight = $height === NULL ? ($width === NULL ? $this->originalImageHeight : $this->originalImageHeight * $width / $this->originalImageWidth) : $height;
+
+        if($width === NULL) {
+            if($height === NULL) {
+                $desiredWidth = $this->originalImageWidth;
+            } else {
+                $desiredWidth = $this->originalImageWidth * $height / $this->originalImageHeight;
+            }
+        } else {
+            $desiredWidth = $width;
+            $hardWidth = true;
+        }
+
+        if($height === NULL) {
+            if($width === NULL) {
+                $desiredHeight = $this->originalImageHeight;
+            } else {
+                $desiredHeight = $this->originalImageHeight * $width / $this->originalImageWidth;
+            }
+        } else {
+            $desiredHeight = $height;
+            $hardHeight = true;
+        }
+
         $desiredAspect = $desiredWidth / $desiredHeight;
 
         // Adjust width if larger than max width - maintain aspect ratio
         if($desiredWidth > $desiredMaxWidth) {
             $desiredWidth = $desiredMaxWidth;
-            $desiredHeight = $desiredWidth / $desiredAspect;
+            if($hardHeight === false) {
+                $desiredHeight = $desiredWidth / $desiredAspect;
+            }
         }
 
-        // Adjust width if larger than max width - maintain aspect ratio
+        // Adjust width if larger than max height - maintain aspect ratio
         if($desiredHeight > $desiredMaxHeight) {
             $desiredHeight = $desiredMaxHeight;
-            $desiredWidth = $desiredHeight * $desiredAspect;
+            if($hardWidth === false) {
+                $desiredWidth = $desiredHeight * $desiredAspect;
+            }
         }
 
-        $this->debug($desiredWidth);
-        $this->debug($desiredHeight);
+        $desiredAspect = $desiredWidth / $desiredHeight;
+
+        $this->debug('Requested width: ' . $desiredWidth);
+        $this->debug('Requested height: ' . $desiredHeight);
 
         if ($originalAspect >= $desiredAspect) {
             // If image is wider than thumbnail (in aspect ratio sense)
